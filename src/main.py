@@ -89,7 +89,7 @@ def concat_gif(frames: list[Path]) -> Path:
             with open(frame, "rb") as inp:
                 out.write(inp.read())
                 if not is_last:
-                    out.write(b"A")
+                    out.write(b"\xde\xad\xbe\xef")
     return tmp
 
 
