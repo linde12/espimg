@@ -1,5 +1,6 @@
 import random
 import tempfile
+from subprocess import call
 from pathlib import Path
 from subprocess import Popen
 
@@ -38,7 +39,7 @@ def transform_picture(path: Path, width: int = 249, height: int = 122) -> Path:
 
     # Rotate the image if it's taller than it is wide, so that it fits on a landscape screen
     # TODO: Make this respect the input width/height aspect ratio
-    with Image.open(path) as img:
+    with Image.open(tmp_path) as img:
         img_w, img_h = img.size
 
     if img_h > img_w:
@@ -46,9 +47,19 @@ def transform_picture(path: Path, width: int = 249, height: int = 122) -> Path:
         p = Popen(["magick", tmp_path, "-rotate", "90", tmp_path])
         _ = p.wait()
 
+    # handle gifs, one file split by b'A' per frame - hack but works
+    if path.suffix == ".gif":
+        frames = get_frames(tmp_path)
+        raw_frames = [convert_to_raw(frame, width, height) for frame in frames]
+        return concat_gif(raw_frames)
+
+    return convert_to_raw(tmp_path, width, height)
+
+
+def convert_to_raw(path: Path, width: int, height: int) -> Path:
     options = [
         "magick",
-        tmp_path,
+        path,
         "-resize",
         f"{width}x{height}!",
         "-monochrome",
@@ -63,6 +74,27 @@ def transform_picture(path: Path, width: int = 249, height: int = 122) -> Path:
     ]
 
     # Perform transformation, print stdout
-    p = Popen([*options, f"gray:{tmp_path.with_suffix('.raw')}"])
+    p = Popen([*options, f"gray:{path.with_suffix('.raw')}"])
     _ = p.wait()
-    return tmp_path.with_suffix(".raw")
+    return path.with_suffix(".raw")
+
+
+def concat_gif(frames: list[Path]) -> Path:
+    # condense the frames into a single file split by b'A'
+    tmp = Path(tempfile.mktemp(suffix=".rawg"))
+    tmp.touch()
+    with open(tmp, "wb") as out:
+        for idx, frame in enumerate(frames):
+            is_last = idx == len(frames) - 1
+            with open(frame, "rb") as inp:
+                out.write(inp.read())
+                if not is_last:
+                    out.write(b"A")
+    return tmp
+
+
+def get_frames(path: Path) -> list[Path]:
+    frames_path = Path(tempfile.mkdtemp(prefix="frames"))
+    # convert gif to frames
+    call(["magick", str(path), str(frames_path / "frame%04d.png")])
+    return [*frames_path.glob("*.png")]
